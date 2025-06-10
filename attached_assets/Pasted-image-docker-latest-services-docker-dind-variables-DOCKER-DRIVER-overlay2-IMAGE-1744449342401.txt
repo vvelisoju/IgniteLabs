@@ -1,0 +1,99 @@
+image: docker:latest
+
+services:
+  - docker:dind
+
+variables:
+  DOCKER_DRIVER: overlay2
+  IMAGE_API: $CI_REGISTRY_IMAGE/api
+  IMAGE_APP: $CI_REGISTRY_IMAGE/app
+  # IMAGE_AI:  $CI_REGISTRY_IMAGE/ai
+
+stages:
+  - build
+  - deploy
+
+before_script:
+  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .docker
+
+build_api:
+  stage: build
+  script:
+    - docker build --cache-from $IMAGE_API:cache -t $IMAGE_API:$CI_COMMIT_SHORT_SHA ./api
+    - docker push $IMAGE_API:$CI_COMMIT_SHORT_SHA
+  only:
+    - dev
+    - main
+
+# build_ai:
+#   stage: build
+#   script:
+#     - docker build --cache-from $IMAGE_AI:cache -t $IMAGE_AI:$CI_COMMIT_SHORT_SHA ./ai
+#     - docker push $IMAGE_AI:$CI_COMMIT_SHORT_SHA
+#   only:
+#     - dev
+#     - main
+
+build_app:
+  stage: build
+  script:
+    - docker build --cache-from $IMAGE_APP:cache -t $IMAGE_APP:$CI_COMMIT_SHORT_SHA ./app
+    - docker push $IMAGE_APP:$CI_COMMIT_SHORT_SHA
+  only:
+    - dev
+    - main
+
+.deploy_template: &deploy_template
+  stage: deploy
+  script:
+    - docker pull $IMAGE_API:$CI_COMMIT_SHORT_SHA
+    - docker tag  $IMAGE_API:$CI_COMMIT_SHORT_SHA $IMAGE_API:$TARGET_ENV-latest
+    - docker push $IMAGE_API:$TARGET_ENV-latest
+
+    - docker pull $IMAGE_APP:$CI_COMMIT_SHORT_SHA
+    - docker tag  $IMAGE_APP:$CI_COMMIT_SHORT_SHA $IMAGE_APP:$TARGET_ENV-latest
+    - docker push $IMAGE_APP:$TARGET_ENV-latest
+
+    # - docker pull $IMAGE_AI:$CI_COMMIT_SHORT_SHA
+    # - docker tag  $IMAGE_AI:$CI_COMMIT_SHORT_SHA $IMAGE_AI:$TARGET_ENV-latest
+    # - docker push $IMAGE_AI:$TARGET_ENV-latest
+
+  environment:
+    name: $TARGET_ENV
+    url: https://$TARGET_ENV-booking.codevel.com
+
+deploy_dev:
+  <<: *deploy_template
+  variables:
+    TARGET_ENV: "dev"
+  only:
+    - dev
+
+deploy_test:
+  <<: *deploy_template
+  variables:
+    TARGET_ENV: "test"
+  only:
+    - dev
+  when: manual
+
+deploy_uat:
+  <<: *deploy_template
+  variables:
+    TARGET_ENV: "uat"
+  only:
+    - main
+ ## when: manual
+
+deploy_prod:
+  <<: *deploy_template
+  variables:
+    TARGET_ENV: "prod"
+  only:
+    - main
+  when: manual

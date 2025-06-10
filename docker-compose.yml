@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    depends_on:
+      - postgres
+    environment:
+      - NODE_ENV=production
+      - PGHOST=postgres
+      - PGUSER=postgres
+      - PGPASSWORD=postgres_password  # Should be changed in production
+      - PGDATABASE=ignitelabs
+      - PGPORT=5432
+      - DATABASE_URL=postgresql://postgres:postgres_password@postgres:5432/ignitelabs?schema=public
+      - SESSION_SECRET=your_session_secret  # Should be changed in production
+      - APP_URL=http://localhost:5000  # Update with your domain in production
+      - DEFAULT_TENANT_ID=1
+      # Database initialization options
+      - SEED_DATABASE=true  # Set to false in production after initial setup
+      - BACKUP_BEFORE_MIGRATE=true  # Creates a backup before migration
+      # Add your Mailgun configuration here
+      # - MAILGUN_API_KEY=your_api_key
+      # - MAILGUN_DOMAIN=your_domain
+      # - MAILGUN_FROM=your_from_address
+    volumes:
+      - ./uploads:/app/uploads
+      - ./prisma:/app/prisma
+      - ./backups:/app/backups
+      # For development, comment these out in production:
+      # - ./server:/app/server
+      # - ./client:/app/client
+
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres_password  # Should be changed in production
+      - POSTGRES_DB=ignitelabs
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

@@ -1,0 +1,107 @@
+🔥 Ignite Labs - Batch-Based Learning & Training Platform
+A real-time, job-oriented training platform that simulates corporate environments while ensuring structured learning for multiple student batches.
+
+🎭 User Roles & Responsibilities
+1️⃣ Admin (Training Manager)
+Creates & manages batches (start date, end date, trainer assignment).
+
+Controls weekly course unlocks per batch.
+
+Monitors student progress, batch analytics & generates reports.
+
+2️⃣ Trainer (Mentor)
+Prepares & uploads master course content (Videos, PDFs, Rich Text).
+
+Assigns batch-specific coding tasks & real-world projects.
+
+Conducts live code reviews & evaluates team projects.
+
+3️⃣ Student (Trainee)
+Enrolled in a batch & follows a structured weekly course.
+
+Completes assignments & projects using an integrated JavaScript code editor.
+
+Works in team-based real-world projects & submits work via GitHub.
+
+📌 Modules & Features
+1️⃣ Authentication & User Management
+✔ Role-based authentication (Admin, Trainer, Student).
+✔ Secure login/signup with JWT authentication.
+✔ Batch enrollment during registration.
+
+2️⃣ Batch Management System
+✔ Batch Creation & Scheduling
+
+Admin creates multiple batches with start & end dates.
+
+Assigns trainers & students to each batch.
+
+Batches inherit predefined course materials.
+
+✔ Batch-Specific Course Unlocking
+
+Course modules unlock weekly per batch schedule.
+
+Trainers can customize assignments & projects per batch.
+
+✔ Batch Analytics & Leaderboards
+
+Track batch progress, task completion rates & top performers.
+
+3️⃣ Course & Content Management
+✔ Trainer-Prepared Master Course
+
+Trainers create course materials once (Videos, PDFs, Rich Text).
+
+All batches follow the same structured curriculum.
+
+✔ Batch-Specific Course Unlocking
+
+Course content unlocks weekly per batch schedule.
+
+Trainers cannot modify core content per batch.
+
+✔ Batch-Specific Assignments & Projects
+
+Trainers can add batch-specific coding tasks & real-world projects.
+
+✔ Material Types Supported
+
+Videos (MP4, WebM)
+
+PDFs & Docs
+
+Rich Text Content (Lessons, Examples, Code Snippets)
+
+4️⃣ Task & Assignment Management
+✔ Trainers assign daily coding tasks & debugging challenges per batch.
+✔ Students can self-assign & complete their own tasks.
+✔ GitHub integration for task submissions (Pull Request workflow).
+✔ Trainer reviews & provides feedback on assignments.
+
+5️⃣ JavaScript Code Editor (For Live Coding & Debugging)
+✔ In-browser JavaScript editor with auto-complete & debugging tools.
+✔ Students write, test, and submit assignments.
+✔ Trainers review code submissions & leave comments.
+✔ Version history & previous attempts tracking.
+
+6️⃣ Team Collaboration & Agile Workflow
+✔ Batch-wise team projects (Scrum/Agile methodology).
+✔ Kanban board integration for task tracking.
+✔ Daily stand-up meeting updates (via text/video).
+✔ Pull request (PR) reviews & peer code feedback.
+
+7️⃣ Progress Tracking & Reports
+✔ Batch-wise progress dashboard for students & trainers.
+✔ Performance analytics (Code Quality, Task Completion Rate).
+✔ Trainer insights & personalized improvement suggestions.
+
+8️⃣ Mock Interviews & Career Readiness
+✔ Weekly coding tests & real-world problem-solving challenges.
+✔ Live mock interviews with trainers & external evaluators.
+✔ Resume-building & corporate communication workshops.
+
+9️⃣ Notifications & Alerts
+✔ Batch-specific task & assignment reminders.
+✔ Course unlock notifications.
+✔ Feedback alerts from trainers.

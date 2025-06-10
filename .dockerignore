@@ -1,0 +1,65 @@
+# Version control
+.git
+.gitignore
+
+# Dependencies
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Environment (exclude all but .env.example)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+
+# Build output
+dist
+build
+*.tsbuildinfo
+
+# Logs
+logs
+*.log
+error.log
+
+# IDE files
+.idea
+.vscode
+*.swp
+*.swo
+
+# Testing
+coverage
+.nyc_output
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Prisma specific (don't ignore these)
+!prisma/schema.prisma
+!prisma/migrations
+
+# Temporary files
+tmp
+temp
+
+# Large files
+*.zip
+*.tar
+*.tar.gz
+
+# Backups
+*.backup
+*.bak
+routes.ts.backup
+schema.ts.backup
+
+# Docker related files (already in container context)
+docker-compose*.yml
+Dockerfile*
+.dockerignore

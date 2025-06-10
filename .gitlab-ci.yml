@@ -1,0 +1,99 @@
+image: docker:latest
+
+services:
+  - docker:dind
+
+variables:
+  DOCKER_DRIVER: overlay2
+  IMAGE_NAME: $CI_REGISTRY_IMAGE/ignitelabs
+
+stages:
+  - build
+  - deploy
+
+before_script:
+  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .docker
+    - node_modules/
+    - .npm/
+    - .cache/
+    - prisma/generated/
+    - dist/
+
+# Build stage
+build:
+  stage: build
+  script:
+    # Pull previous images for layer caching
+    - docker pull $IMAGE_NAME:cache || true
+    - docker pull $IMAGE_NAME:latest || true
+    
+    # Build with cache and label with commit info
+    - >
+      docker build
+      --cache-from $IMAGE_NAME:cache
+      --cache-from $IMAGE_NAME:latest
+      --build-arg COMMIT_SHA=$CI_COMMIT_SHA
+      --build-arg COMMIT_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+      --build-arg COMMIT_BRANCH=$CI_COMMIT_REF_NAME
+      -t $IMAGE_NAME:$CI_COMMIT_SHORT_SHA
+      -t $IMAGE_NAME:cache
+      -t $IMAGE_NAME:latest
+      .
+    
+    # Push all image tags
+    - docker push $IMAGE_NAME:$CI_COMMIT_SHORT_SHA
+    - docker push $IMAGE_NAME:cache
+    - docker push $IMAGE_NAME:latest
+  only:
+    - dev
+    - main
+
+# Deploy template that can be reused for different environments
+.deploy_template: &deploy_template
+  stage: deploy
+  script:
+    - docker pull $IMAGE_NAME:$CI_COMMIT_SHORT_SHA
+    - docker tag  $IMAGE_NAME:$CI_COMMIT_SHORT_SHA $IMAGE_NAME:$TARGET_ENV-latest
+    - docker push $IMAGE_NAME:$TARGET_ENV-latest
+
+  environment:
+    name: $TARGET_ENV
+    url: https://$TARGET_ENV-ignitelabs.codevel.com
+
+# Development environment deployment
+
+deploy_dev:
+  <<: *deploy_template
+  variables:
+    TARGET_ENV: "dev"
+  only:
+    - dev
+
+deploy_test:
+  <<: *deploy_template
+  variables:
+    TARGET_ENV: "test"
+  only:
+    - dev
+  when: manual
+
+deploy_uat:
+  <<: *deploy_template
+  variables:
+    TARGET_ENV: "uat"
+  only:
+    - main
+ ## when: manual
+
+deploy_prod:
+  <<: *deploy_template
+  variables:
+    TARGET_ENV: "prod"
+  only:
+    - main
+  when: manual

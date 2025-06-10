@@ -1,0 +1,960 @@
+import { Request, Response, NextFunction, Express } from 'express';
+import { createServer, Server } from 'http';
+import { storage } from './storage';
+import { 
+  insertLeadSchema, insertStudentSchema, insertPaymentSchema,
+  insertFollowUpSchema, insertFollowUpCommentSchema, insertBatchSchema,
+  leadStatusEnum, paymentMethodEnum
+} from '../shared/schema';
+import { setupAuth, isAuthenticated, isAdmin, isManager, isTrainer } from './auth';
+import authRouter from './middleware/auth-router';
+import { db } from './db';
+import { generateInvoice, generateInvoiceBuffer } from './utils/invoiceGenerator';
+import { eq } from 'drizzle-orm';
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  // Set up authentication with passport and session
+  setupAuth(app);
+  
+  // Register auth router for /api/auth endpoints
+  app.use('/api/auth', authRouter);
+
+  // Helper to handle async route handlers
+  const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) => {
+    return (req: Request, res: Response, next: NextFunction) => {
+      Promise.resolve(fn(req, res, next)).catch(next);
+    };
+  };
+
+  // Lead management endpoints
+  app.get('/api/leads', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const filters = req.query as any;
+    const leads = await storage.getAllLeads(filters);
+    res.json(leads);
+  }));
+
+  app.get('/api/leads/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const lead = await storage.getLeadById(Number(req.params.id));
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+    res.json(lead);
+  }));
+
+  app.post('/api/leads', asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const leadData = insertLeadSchema.parse(req.body);
+      const lead = await storage.createLead(leadData);
+      res.status(201).json(lead);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  app.put('/api/leads/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    try {
+      const id = Number(req.params.id);
+      const leadData = req.body;
+      
+      // Validate status if provided
+      if (leadData.status && !Object.values(leadStatusEnum.enumValues).includes(leadData.status)) {
+        return res.status(400).json({ error: 'Invalid status value' });
+      }
+      
+      const updatedLead = await storage.updateLead(id, leadData);
+      if (!updatedLead) {
+        return res.status(404).json({ error: 'Lead not found' });
+      }
+      
+      res.json(updatedLead);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  app.delete('/api/leads/:id', asyncHandler(async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const success = await storage.deleteLead(id);
+    if (!success) {
+      return res.status(404).json({ error: 'Lead not found or could not be deleted' });
+    }
+    res.status(204).send();
+  }));
+
+  // Student management endpoints
+  app.get('/api/students', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const filters = req.query as any;
+    const students = await storage.getAllStudents(filters);
+    res.json(students);
+  }));
+
+  app.get('/api/students/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const student = await storage.getStudentById(Number(req.params.id));
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    res.json(student);
+  }));
+
+  app.post('/api/students', asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const studentData = insertStudentSchema.parse(req.body);
+      const student = await storage.createStudent(studentData);
+      res.status(201).json(student);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  app.put('/api/students/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    try {
+      const id = Number(req.params.id);
+      const studentData = req.body;
+      const updatedStudent = await storage.updateStudent(id, studentData);
+      if (!updatedStudent) {
+        return res.status(404).json({ error: 'Student not found' });
+      }
+      
+      res.json(updatedStudent);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  app.delete('/api/students/:id', asyncHandler(async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const success = await storage.deleteStudent(id);
+    if (!success) {
+      return res.status(404).json({ error: 'Student not found or could not be deleted' });
+    }
+    res.status(204).send();
+  }));
+  
+  // Handle enrollment updates (alias for students update)
+  app.put('/api/enrollments/:id', asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      const studentData = req.body;
+      
+      // Cache control - force fresh data
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      
+      const updatedStudent = await storage.updateStudent(id, studentData);
+      if (!updatedStudent) {
+        return res.status(404).json({ error: 'Enrollment not found' });
+      }
+      
+      res.json(updatedStudent);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  // Lead conversion endpoint
+  app.post('/api/leads/:id/convert', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+      
+    try {
+      const leadId = Number(req.params.id);
+      const studentData = req.body;
+      
+      // Validate the input
+      if (!studentData.batch || !studentData.enrollmentDate || !studentData.totalFee) {
+        return res.status(400).json({ error: 'Missing required fields (batch, enrollmentDate, totalFee)' });
+      }
+      
+      // Validate payment data if initial payment is provided
+      if (studentData.initialPayment && !studentData.paymentMethod) {
+        return res.status(400).json({ error: 'Payment method is required when initial payment is provided' });
+      }
+      
+      // Make sure reference field is present (can be empty) for database compatibility
+      if (studentData.initialPayment && studentData.reference === undefined) {
+        studentData.reference = '';
+      }
+      
+      // Convert the batch field to batchId for database compatibility
+      const formattedStudentData = {
+        ...studentData,
+        batchId: Number(studentData.batch) // Map batch to batchId
+      };
+      
+      // Remove the batch field as it's not in our database schema
+      delete formattedStudentData.batch;
+      
+      console.log('Formatted student data:', formattedStudentData);
+      
+      // Convert lead to student
+      const student = await storage.convertLeadToStudent(leadId, formattedStudentData);
+      res.status(201).json(student);
+    } catch (error: any) {
+      if (error.message.includes('not found')) {
+        return res.status(404).json({ error: error.message });
+      }
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  // Payment management endpoints
+  app.get('/api/students/:id/payments', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const studentId = Number(req.params.id);
+    
+    // Check if student exists
+    const student = await storage.getStudentById(studentId);
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    
+    const payments = await storage.getStudentPayments(studentId);
+    res.json(payments);
+  }));
+
+  // Direct payments endpoint for working with enrollments
+  app.post('/api/payments', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    try {
+      const paymentData = req.body;
+      
+      // Validate enrollmentId and studentId are present and are numbers
+      if (!paymentData.enrollmentId || isNaN(Number(paymentData.enrollmentId))) {
+        return res.status(400).json({ error: 'Valid enrollmentId is required' });
+      }
+      
+      const enrollmentId = Number(paymentData.enrollmentId);
+      
+      // Since we may not have a direct enrollments table, we'll look up the student directly
+      // Get the student using the studentId in the payload or from the enrollment
+      let studentId = paymentData.studentId;
+      
+      // If no studentId is provided, find the student by checking enrollments
+      if (!studentId) {
+        // This logic assumes that the enrollmentId is the same as the studentId
+        studentId = enrollmentId;
+      }
+      
+      // Check if student exists
+      const student = await storage.getStudentById(studentId);
+      if (!student) {
+        return res.status(404).json({ error: 'Student not found for this enrollment' });
+      }
+      
+      // Add studentId to the payment data
+      const completePaymentData = {
+        ...paymentData,
+        studentId: studentId,
+        enrollmentId: enrollmentId,
+        amount: paymentData.amount, // Keep as string as expected by schema
+      };
+      
+      // Validate payment method if provided
+      if (completePaymentData.paymentMethod && !Object.values(paymentMethodEnum.enumValues).includes(completePaymentData.paymentMethod)) {
+        return res.status(400).json({ error: 'Invalid payment method' });
+      }
+      
+      try {
+        // Ensure amount is a string before validation
+        if (typeof completePaymentData.amount === 'number') {
+          completePaymentData.amount = String(completePaymentData.amount);
+        }
+        
+        const validatedPaymentData = insertPaymentSchema.parse(completePaymentData);
+        // Record the payment
+        const payment = await storage.recordPayment(validatedPaymentData);
+        
+        res.status(201).json(payment);
+      } catch (validationError: any) {
+        console.error('Validation error:', validationError);
+        return res.status(400).json({ error: `Validation error: ${validationError.message}` });
+      }
+    } catch (error: any) {
+      console.error('Payment error:', error);
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  // Student payments endpoint (by student ID)
+  app.post('/api/students/:id/payments', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    try {
+      const studentId = Number(req.params.id);
+      
+      // Check if student exists
+      const student = await storage.getStudentById(studentId);
+      if (!student) {
+        return res.status(404).json({ error: 'Student not found' });
+      }
+      
+      // Validate the payment data
+      const paymentData = {
+        ...req.body,
+        studentId
+      };
+      
+      // Validate payment method if provided
+      if (paymentData.paymentMethod && !Object.values(paymentMethodEnum.enumValues).includes(paymentData.paymentMethod)) {
+        return res.status(400).json({ error: 'Invalid payment method' });
+      }
+      
+      // Ensure amount is a string before validation
+      if (typeof paymentData.amount === 'number') {
+        paymentData.amount = String(paymentData.amount);
+      }
+        
+      const validatedPaymentData = insertPaymentSchema.parse(paymentData);
+      
+      // Record the payment
+      const payment = await storage.recordPayment(validatedPaymentData);
+      
+      res.status(201).json(payment);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  // Follow-up management endpoints
+  app.get('/api/follow-ups', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const filters = req.query as any;
+    const followUps = await storage.getAllFollowUps(filters);
+    res.json(followUps);
+  }));
+  
+  // Follow-up analytics and scheduling endpoints
+  // These specific routes need to come before the /:id route to avoid conflicts
+  app.get('/api/follow-ups/schedule/today', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const today = new Date();
+    const followUps = await storage.getFollowUpsByDate(today);
+    res.json(followUps);
+  }));
+
+  app.get('/api/follow-ups/schedule/range', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    try {
+      const startDateStr = req.query.startDate as string;
+      const endDateStr = req.query.endDate as string;
+      
+      if (!startDateStr || !endDateStr) {
+        return res.status(400).json({ error: 'Both startDate and endDate query parameters are required' });
+      }
+      
+      const startDate = new Date(startDateStr);
+      const endDate = new Date(endDateStr);
+      
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD format.' });
+      }
+      
+      const followUps = await storage.getFollowUpsByDateRange(startDate, endDate);
+      res.json(followUps);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  app.get('/api/follow-ups/assigned/:userId', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const userId = Number(req.params.userId);
+    
+    // Check if user exists
+    const user = await storage.getUserById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const followUps = await storage.getFollowUpsByAssignedUser(userId);
+    res.json(followUps);
+  }));
+
+  app.get('/api/follow-ups/overdue', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const overdueFollowUps = await storage.getOverdueFollowUps();
+    res.json(overdueFollowUps);
+  }));
+
+  // This more general route should come after all specific /follow-ups/ routes
+  app.get('/api/follow-ups/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const followUp = await storage.getFollowUpById(Number(req.params.id));
+    if (!followUp) {
+      return res.status(404).json({ error: 'Follow-up not found' });
+    }
+    res.json(followUp);
+  }));
+
+  app.get('/api/leads/:id/follow-ups', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const leadId = Number(req.params.id);
+    
+    // Check if lead exists
+    const lead = await storage.getLeadById(leadId);
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+    
+    const followUps = await storage.getLeadFollowUps(leadId);
+    res.json(followUps);
+  }));
+
+  app.post('/api/follow-ups', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    try {
+      const followUpData = insertFollowUpSchema.parse(req.body);
+      
+      // Check if lead exists
+      const lead = await storage.getLeadById(followUpData.leadId);
+      if (!lead) {
+        return res.status(404).json({ error: 'Lead not found' });
+      }
+      
+      const followUp = await storage.createFollowUp(followUpData);
+      res.status(201).json(followUp);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  app.put('/api/follow-ups/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    try {
+      const id = Number(req.params.id);
+      const followUpData = req.body;
+      
+      const updatedFollowUp = await storage.updateFollowUp(id, followUpData);
+      if (!updatedFollowUp) {
+        return res.status(404).json({ error: 'Follow-up not found' });
+      }
+      
+      res.json(updatedFollowUp);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  app.delete('/api/follow-ups/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const id = Number(req.params.id);
+    const success = await storage.deleteFollowUp(id);
+    if (!success) {
+      return res.status(404).json({ error: 'Follow-up not found or could not be deleted' });
+    }
+    res.status(204).send();
+  }));
+
+  app.post('/api/follow-ups/:id/complete', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const id = Number(req.params.id);
+    const completedFollowUp = await storage.completeFollowUp(id);
+    if (!completedFollowUp) {
+      return res.status(404).json({ error: 'Follow-up not found' });
+    }
+    res.json(completedFollowUp);
+  }));
+
+  // Follow-up comments endpoints
+  app.get('/api/follow-ups/:id/comments', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const followUpId = Number(req.params.id);
+    
+    // Check if follow-up exists
+    const followUp = await storage.getFollowUpById(followUpId);
+    if (!followUp) {
+      return res.status(404).json({ error: 'Follow-up not found' });
+    }
+    
+    const comments = await storage.getFollowUpComments(followUpId);
+    res.json(comments);
+  }));
+
+  app.post('/api/follow-ups/:id/comments', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    try {
+      const followUpId = Number(req.params.id);
+      
+      // Check if follow-up exists
+      const followUp = await storage.getFollowUpById(followUpId);
+      if (!followUp) {
+        return res.status(404).json({ error: 'Follow-up not found' });
+      }
+      
+      const commentData = {
+        ...req.body,
+        followUpId
+      };
+      
+      const validatedCommentData = insertFollowUpCommentSchema.parse(commentData);
+      const comment = await storage.addFollowUpComment(validatedCommentData);
+      
+      res.status(201).json(comment);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  // Batch management endpoints
+  app.get('/api/batches', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const batches = await storage.getAllBatches();
+    res.json(batches);
+  }));
+  
+  app.get('/api/batches/active', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const batches = await storage.getAllBatches();
+    const activeBatches = batches.filter(batch => batch.isActive);
+    res.json(activeBatches);
+  }));
+
+  app.get('/api/batches/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const batch = await storage.getBatchById(Number(req.params.id));
+    if (!batch) {
+      return res.status(404).json({ error: 'Batch not found' });
+    }
+    res.json(batch);
+  }));
+
+  app.post('/api/batches', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    try {
+      const batchData = insertBatchSchema.parse(req.body);
+      const batch = await storage.createBatch(batchData);
+      res.status(201).json(batch);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  app.put('/api/batches/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    try {
+      const id = Number(req.params.id);
+      const batchData = req.body;
+      
+      const updatedBatch = await storage.updateBatch(id, batchData);
+      if (!updatedBatch) {
+        return res.status(404).json({ error: 'Batch not found' });
+      }
+      
+      res.json(updatedBatch);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+
+  app.delete('/api/batches/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const id = Number(req.params.id);
+    const success = await storage.deleteBatch(id);
+    if (!success) {
+      return res.status(404).json({ error: 'Batch not found or could not be deleted' });
+    }
+    res.status(204).send();
+  }));
+
+  // Get trainers for batch assignment
+  app.get('/api/users/trainers', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const users = await storage.getUsersByRole('trainer');
+    
+    // Transform user data to match the expected trainer interface
+    const trainers = users.map(user => {
+      // Create a new object with defaults for missing values
+      return {
+        ...user,
+        phone: user.phone || '', // Default to empty string if not present
+        specialization: user.specialization || '', // Default to empty string if not present
+        bio: user.bio || '', // Default to empty string if not present
+        status: user.status || 'active' // Default to 'active' if not present
+      };
+    });
+    
+    res.json(trainers);
+  }));
+  
+  // Create a new trainer
+  app.post('/api/trainers', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    try {
+      // Create a new user with trainer role
+      const userData = {
+        ...req.body,
+        role: 'trainer'
+      };
+      
+      const trainer = await storage.createUser(userData);
+      
+      // Transform user data to match the expected trainer interface
+      const trainerData = {
+        ...trainer,
+        phone: trainer.phone || '', // Default to empty string if not present
+        specialization: trainer.specialization || '', // Default to empty string if not present
+        bio: trainer.bio || '', // Default to empty string if not present
+        status: trainer.status || 'active' // Default to 'active' if not present
+      };
+      
+      res.status(201).json(trainerData);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }));
+  
+  // Get trainer by ID
+  app.get('/api/trainers/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const id = Number(req.params.id);
+    const user = await storage.getUserById(id);
+    
+    if (!user || user.role !== 'trainer') {
+      return res.status(404).json({ error: 'Trainer not found' });
+    }
+    
+    // Transform user data to match the expected trainer interface
+    const trainerData = {
+      ...user,
+      phone: user.phone || '', // Default to empty string if not present
+      specialization: user.specialization || '', // Default to empty string if not present
+      bio: user.bio || '', // Default to empty string if not present
+      status: user.status || 'active' // Default to 'active' if not present
+    };
+    
+    res.json(trainerData);
+  }));
+  
+  // Update trainer
+  app.put('/api/trainers/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const id = Number(req.params.id);
+    const user = await storage.getUserById(id);
+    
+    if (!user || user.role !== 'trainer') {
+      return res.status(404).json({ error: 'Trainer not found' });
+    }
+    
+    // Prevent changing role from trainer
+    const userData = {
+      ...req.body,
+      role: 'trainer'
+    };
+    
+    const updatedTrainer = await storage.updateUser(id, userData);
+    
+    // Transform updated user data to match the expected trainer interface
+    const trainerData = updatedTrainer ? {
+      ...updatedTrainer,
+      phone: updatedTrainer.phone || '', // Default to empty string if not present
+      specialization: updatedTrainer.specialization || '', // Default to empty string if not present
+      bio: updatedTrainer.bio || '', // Default to empty string if not present
+      status: updatedTrainer.status || 'active' // Default to 'active' if not present
+    } : {};
+    
+    res.json(trainerData);
+  }));
+  
+  // Delete trainer
+  app.delete('/api/trainers/:id', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const id = Number(req.params.id);
+    const user = await storage.getUserById(id);
+    
+    if (!user || user.role !== 'trainer') {
+      return res.status(404).json({ error: 'Trainer not found' });
+    }
+    
+    // Check if trainer is assigned to any batches
+    const assignedBatches = await storage.getBatchesByTrainer(id);
+    if (assignedBatches.length > 0) {
+      return res.status(400).json({ 
+        error: 'Trainer cannot be deleted because they are assigned to batches',
+        batches: assignedBatches
+      });
+    }
+    
+    const success = await storage.deleteUser(id);
+    if (!success) {
+      return res.status(500).json({ error: 'Failed to delete trainer' });
+    }
+    
+    res.status(204).send();
+  }));
+  
+  // Get batches assigned to a trainer
+  app.get('/api/trainers/:id/batches', asyncHandler(async (req: Request, res: Response) => {
+    // Cache control - force fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const id = Number(req.params.id);
+    const user = await storage.getUserById(id);
+    
+    if (!user || user.role !== 'trainer') {
+      return res.status(404).json({ error: 'Trainer not found' });
+    }
+    
+    const batches = await storage.getBatchesByTrainer(id);
+    res.json(batches);
+  }));
+
+  // Invoice PDF endpoints
+  app.get('/api/invoices/:paymentId', asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const paymentId = parseInt(req.params.paymentId);
+      
+      // Get payment data
+      const payment = await storage.getPaymentById(paymentId);
+      if (!payment) {
+        return res.status(404).json({ error: 'Payment not found' });
+      }
+      
+      // Get student data
+      const student = await storage.getStudentById(payment.studentId);
+      if (!student) {
+        return res.status(404).json({ error: 'Student not found' });
+      }
+      
+      // Get batch data if student has a batch
+      let batch = null;
+      if (student.batchId) {
+        batch = await storage.getBatchById(student.batchId);
+      }
+      
+      // Get organization settings from storage
+      const organization = await storage.getOrganizationDetails();
+      
+      // Generate invoice PDF as buffer
+      const pdfBuffer = await generateInvoiceBuffer({
+        payment,
+        student: {
+          ...student,
+          batch: batch || undefined
+        },
+        organization
+      });
+      
+      // Set response headers for PDF download
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="invoice-${payment.id}.pdf"`);
+      res.setHeader('Content-Length', pdfBuffer.length);
+      
+      // Send the PDF buffer as response
+      res.send(pdfBuffer);
+    } catch (error: any) {
+      console.error('Error generating invoice:', error);
+      res.status(500).json({ error: `Error generating invoice: ${error.message}` });
+    }
+  }));
+  
+  // Consolidated invoice for a student (all payments)
+  app.get('/api/students/:studentId/invoices/consolidated', asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const studentId = parseInt(req.params.studentId);
+      
+      // Get student data
+      const student = await storage.getStudentById(studentId);
+      if (!student) {
+        return res.status(404).json({ error: 'Student not found' });
+      }
+      
+      // Get all payments for the student
+      const payments = await storage.getStudentPayments(studentId);
+      if (!payments || payments.length === 0) {
+        return res.status(404).json({ error: 'No payments found for this student' });
+      }
+      
+      // Get batch data if student has a batch
+      let batch = null;
+      if (student.batchId) {
+        batch = await storage.getBatchById(student.batchId);
+      }
+      
+      // Get organization settings (hardcoded for now)
+      const organization = {
+        name: 'Ignite Labs',
+        address: '123 Main St, Tech Hub, Bangalore - 560001',
+        phone: '+91 9876543210',
+        email: 'info@ignitelabs.edu',
+      // Get organization settings from storage
+      const organization = await storage.getOrganizationDetails();
+      
+      const consolidatedPayment = {
+        ...payments[0], // Use first payment as template
+        id: 0, // Special ID for consolidated invoice
+        amount: totalAmount.toString(),
+        paymentDate: new Date().toISOString().split('T')[0], // Current date
+        reference: 'Consolidated Invoice',
+        notes: `Includes ${payments.length} payment(s) made between ${new Date(payments[0].paymentDate).toLocaleDateString()} and ${new Date(payments[payments.length - 1].paymentDate).toLocaleDateString()}`
+      };
+      
+      // Generate invoice PDF as buffer
+      const pdfBuffer = await generateInvoiceBuffer({
+        payment: consolidatedPayment,
+        student: {
+          ...student,
+          batch: batch || undefined
+        },
+        organization
+      });
+      
+      // Set response headers for PDF download
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="consolidated-invoice-${student.id}.pdf"`);
+      res.setHeader('Content-Length', pdfBuffer.length);
+      
+      // Send the PDF buffer as response
+      res.send(pdfBuffer);
+    } catch (error: any) {
+      console.error('Error generating consolidated invoice:', error);
+      res.status(500).json({ error: `Error generating consolidated invoice: ${error.message}` });
+    }
+  }));
+
+  // Create the HTTP server
+  const httpServer = createServer(app);
+  
+  return httpServer;
+}
